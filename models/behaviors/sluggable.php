@@ -2,15 +2,15 @@
 /**
  * Sluggable Behavior class
  *
- * Creates slugs-key of DB entries
+ * Creates slugs-key of DB entries on-the-fly
  *
  * Licensed under The MIT License
  * Redistributions of files must retain the above copyright notice.
  *
  * @author Lucas Ferreira
  * @license MIT License (http://www.opensource.org/licenses/mit-license.php)
- * @copyright Copyright 2010, Burn web.studio - http://www.burnweb.com.br/
- * @version 0.3b
+ * @copyright Copyright 2010-2011, Burn web.studio - http://www.burnweb.com.br/
+ * @version 0.7b
  */
 
 class SluggableBehavior extends ModelBehavior
@@ -19,23 +19,31 @@ class SluggableBehavior extends ModelBehavior
 	
 	function setup(&$model, $settings=array())
 	{	
-	    $_options = array_merge(array('displayField' => $model->displayField, 'primaryKey' => $model->primaryKey, 'slugField' => 'slug'), $settings);
-		$this->options[$model->name] = &$_options;
+	    $_options = array_merge(array(
+			'name' => $model->alias,
+			'schema' => $model->schema(),		
+			'displayField' => $model->displayField,
+			'primaryKey' => $model->primaryKey,
+			'slugField' => 'slug',
+			'replacement' => '-'
+		), $settings);
+		
+		$this->options[$model->alias] = &$_options;
 	}
 	
-	function __slug($description=null, $id=null)
+	function __slug($description=null, $id=null, $s="-")
 	{
 		if(function_exists("_slug"))
 		{
-			return _slug($description, $id);
+			return _slug($description, $id, $s);
 		}
 		else if(class_exists("Util"))
 		{
-			return Util::slug($description, $id);
+			return Util::slug($description, $id, $s);
 		}
 		else
 		{
-			$slugged = Inflector::slug(trim($description), "-") . "-{$id}";
+			$slugged = Inflector::slug(trim($description), $s) . "{$s}{$id}";
 			return function_exists("mb_strtolower") ? mb_strtolower($slugged) : strtolower($slugged);
 		}
 	}
@@ -45,12 +53,12 @@ class SluggableBehavior extends ModelBehavior
 		if(!empty($data['conditions']))
 		{
 			$slug = null;
-			$o = $this->options[$model->name];
+			$o = $this->options[$model->alias];
 			$conditions = $data['conditions'];
-			if(!empty($conditions["{$model->name}.{$o['slugField']}"]))
+			if(!empty($conditions["{$model->alias}.{$o['slugField']}"]))
 			{
-				$slug = $conditions["{$model->name}.{$o['slugField']}"];
-				unset($conditions["{$model->name}.{$o['slugField']}"]);
+				$slug = $conditions["{$model->alias}.{$o['slugField']}"];
+				unset($conditions["{$model->alias}.{$o['slugField']}"]);
 			}
 			if(!empty($conditions["{$o['slugField']}"]))
 			{
@@ -60,7 +68,7 @@ class SluggableBehavior extends ModelBehavior
 			if(!empty($slug))
 			{
 				$id = end(explode("-", $slug));
-				$conditions["{$model->name}.{$o['primaryKey']}"] = $id;
+				$conditions["{$model->alias}.{$o['primaryKey']}"] = $id;
 			}
 			$data['conditions'] = $conditions;
 		}
@@ -70,16 +78,32 @@ class SluggableBehavior extends ModelBehavior
 
 	function afterFind(&$model, $data=array())
 	{
-		$o = $this->options[$model->name];
-		
 		foreach($data as $i=>$d)
 		{
-			if(!empty($d[$model->name]))
+			foreach ($this->options as $ko => $o)
 			{
-				$ad = $d[$model->name];
-				$ad[$o['slugField']] = $this->__slug($ad[$o['displayField']], $ad[$o['primaryKey']]);
+				if(empty($d[$ko][0]))
+				{
+					if(!empty($d[$ko]) && !empty($d[$ko][$o['displayField']]))
+					{
+						$ad = $d[$ko];
+						$ad[$o['slugField']] = $this->__slug($ad[$o['displayField']], $ad[$o['primaryKey']], $o['replacement']);
 
-				$d[$model->name] = $ad;
+						$d[$ko] = $ad;
+					}
+				}
+				else
+				{
+					foreach ($d[$ko] as $kd => $dd)
+					{
+						if(!empty($dd) && !empty($dd[$o['displayField']]))
+						{
+							$dd[$o['slugField']] = $this->__slug($dd[$o['displayField']], $dd[$o['primaryKey']], $o['replacement']);
+
+							$d[$ko][$kd] = $dd;
+						}
+					}
+				}
 			}
 
 			$data[$i] = $d;
